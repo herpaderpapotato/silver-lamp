@@ -23,7 +23,7 @@ model_name = ''
 model = None
 
 def download_model():
-    model_url = "https://huggingface.co/herpaderpapotato/sixty_small_body_ryhthm_time_bidirectional/resolve/main/effv2s_60in_60out_101e.h5?download=true"
+    model_url = "https://huggingface.co/herpaderpapotato/sixty_small_body_ryhthm_time_bidirectional/resolve/main/effv2s_60in_60out_129e.h5?download=true"
     model_name = model_url.split("/")[-1].split("?")[0]
     model_path = os.path.join("models", model_name)
     if not os.path.exists(model_path):
