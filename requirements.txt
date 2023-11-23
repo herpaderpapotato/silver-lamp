@@ -1,0 +1,5 @@
+numpy
+opencv-python
+requests
+tensorflow[and-cuda]
+keras_cv_attention_models
