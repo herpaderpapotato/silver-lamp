@@ -4,12 +4,15 @@ import numpy as np
 from glob import glob
 from collections import deque
 import json
+import random
 import cv2
 import requests
 import numpy as np
+import math
 import onnxruntime as rt
 import cv2
 import json
+import random
 import time
 import os
 
@@ -165,7 +168,7 @@ prediction_frame_numbers_poi = []
 try:
     ret, frame = cap.read()
     display_frame = frame.copy()[0:frame_height, 0:frame_width]
-    cv2.imshow('frame', display_frame)
+    cv2.imshow('frame', display_frame)         # should add a progress bar in the top 10 pixels across the top. And add the ability to click on it for a seek
     key = cv2.waitKey(int(frame_delay))
     while True:
         ret, frame = cap.read()
@@ -204,11 +207,11 @@ try:
         if key == ord('['):
             poi_pct -= 0.01
             poi_pct = max(poi_pct, 0.02)
-            poi_offset = max(int(frame_width * poi_pct) // 2, image_size // 2)
+            poi_offset = min(max(int(frame_width * poi_pct) // 2, image_size // 2),image_size)
         if key == ord(']'):
             poi_pct += 0.01
             poi_pct = min(poi_pct, 1)
-            poi_offset = max(int(frame_width * poi_pct) // 2, image_size // 2)
+            poi_offset = max(min(int(frame_width * poi_pct) // 2, image_size),image_size // 2)
             # need to add some code to make sure poi_x and poi_y are still within bounds based on the offset or growing the pct could cause an error
 
 
@@ -341,6 +344,8 @@ if len(prediction_logged) > 0:
             break
         frame = frame[0:frame_height, 0:frame_width]
         ftime = cap.get(cv2.CAP_PROP_POS_MSEC)
+        # add a line a percentage of the way down the screen based on prediction_logged[i]
+        # match the closest index in prediction_times to ftime
         frame = cv2.resize(frame, (image_size, image_size))
         prediction_times_index = min(range(len(prediction_times)), key=lambda i: abs(prediction_times[i]-ftime))        
         frame = cv2.line(frame, (0, int(image_size * (1 - prediction_logged_original[prediction_times_index]))), (image_size, int(image_size * (1 - prediction_logged_original[prediction_times_index]))), (0, 0, 255), 2)
@@ -348,7 +353,7 @@ if len(prediction_logged) > 0:
         try:
             prediction_poi_index = min(range(len(prediction_times_poi)), key=lambda i: abs(prediction_times_poi[i]-ftime))
             frame = cv2.line(frame, (0, int(image_size * (1 - prediction_logged_poi[prediction_poi_index]))), (image_size, int(image_size * (1 - prediction_logged_poi[prediction_poi_index]))), (255, 0, 0), 2)
-        except IndexError:
+        except:
             pass
 
         cv2.imshow('frame', frame)
@@ -356,12 +361,14 @@ if len(prediction_logged) > 0:
         key = cv2.waitKey(int(frame_delay))
         if key == ord('q'):
             break
-        if key == ord(','):
+        if key == ord(','):  # need a reset to normal time too
             frame_delay_multiplier -= 1
             frame_delay = max(frame_delay_base * frame_delay_multiplier,1)
         if key == ord('.'):
             frame_delay_multiplier += 1
             frame_delay = max(frame_delay_base * frame_delay_multiplier,1)
+        # if not ftime in prediction_times:
+        #     cap.set(cv2.CAP_PROP_POS_MSEC, prediction_times[i])
         if ftime > prediction_times[-1]:
             cap.set(cv2.CAP_PROP_POS_MSEC, prediction_times[0])
         i += 1
