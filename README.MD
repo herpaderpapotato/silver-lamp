@@ -40,7 +40,9 @@ It's not as accurate as it could be
 
 At the moment it is only suitable (barely) for taking some of the tedium out of the process, especially when it comes to obvious and repetitive movement.
 
-Maybe probably migrates to pytorch so that GPU inference can be done in windows. Or tflite for faster cpu in windows. And to test/do more in windows for those not already comfortable with wsl.
+Maybe probably migrates to pytorch so that GPU inference can be done in windows. Or tflite for faster cpu in windows. Or onnx. 
+
+And to test/do more in windows for those not already comfortable with wsl.
 
 
 [Stuff I had to do on a fresh WSL install to get it going](TROUBLESHOOTING.MD)
