@@ -10,7 +10,6 @@ import numpy as np
 import onnxruntime as rt
 import cv2
 import json
-import random
 import time
 import os
 
@@ -204,7 +203,7 @@ try:
             frame_delay = max(frame_delay_base * frame_delay_multiplier,1)
         if key == ord('['):
             poi_pct -= 0.01
-            poi_pct = max(poi_pct, 0.05)
+            poi_pct = max(poi_pct, 0.02)
             poi_offset = max(int(frame_width * poi_pct) // 2, image_size // 2)
         if key == ord(']'):
             poi_pct += 0.01
@@ -331,6 +330,45 @@ if len(prediction_logged) > 0:
             pass
     with open('predictions/' + funscript_filename, 'w') as outfile:
         json.dump(funscript_json_data, outfile)
+
+    # playback the frames from prediction_times
+
+    cap.set(cv2.CAP_PROP_POS_MSEC, prediction_times[0])
+    i = 0
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        frame = frame[0:frame_height, 0:frame_width]
+        ftime = cap.get(cv2.CAP_PROP_POS_MSEC)
+        frame = cv2.resize(frame, (image_size, image_size))
+        prediction_times_index = min(range(len(prediction_times)), key=lambda i: abs(prediction_times[i]-ftime))        
+        frame = cv2.line(frame, (0, int(image_size * (1 - prediction_logged_original[prediction_times_index]))), (image_size, int(image_size * (1 - prediction_logged_original[prediction_times_index]))), (0, 0, 255), 2)
+        frame = cv2.line(frame, (0, int(image_size * (1 - prediction_logged_cropped[prediction_times_index]))), (image_size, int(image_size * (1 - prediction_logged_cropped[prediction_times_index]))), (0, 255, 0), 2)
+        try:
+            prediction_poi_index = min(range(len(prediction_times_poi)), key=lambda i: abs(prediction_times_poi[i]-ftime))
+            frame = cv2.line(frame, (0, int(image_size * (1 - prediction_logged_poi[prediction_poi_index]))), (image_size, int(image_size * (1 - prediction_logged_poi[prediction_poi_index]))), (255, 0, 0), 2)
+        except IndexError:
+            pass
+
+        cv2.imshow('frame', frame)
+        cv2.setWindowTitle('frame', 'frame ' + str(i) + '/' + str(len(prediction_times)))
+        key = cv2.waitKey(int(frame_delay))
+        if key == ord('q'):
+            break
+        if key == ord(','):
+            frame_delay_multiplier -= 1
+            frame_delay = max(frame_delay_base * frame_delay_multiplier,1)
+        if key == ord('.'):
+            frame_delay_multiplier += 1
+            frame_delay = max(frame_delay_base * frame_delay_multiplier,1)
+        if ftime > prediction_times[-1]:
+            cap.set(cv2.CAP_PROP_POS_MSEC, prediction_times[0])
+        i += 1
+        if i > len(prediction_times) - 1:
+            i = 0
+    cv2.destroyAllWindows()
+
 
 
     
