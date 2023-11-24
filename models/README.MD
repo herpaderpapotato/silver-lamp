@@ -33,11 +33,13 @@ scratchpad
 
 previously trained frame skipping (simulate 30fps data vs 60fps)
 
+why 60 frames of prediction? 9 frames was too jittery. Overlapping predictions don't smooth nice enough.
+
 may need to train on non linear frames to make the model less linear or more adaptable. May even mix up videos in a sequence or find matching trajectories across videos and mash together
 
 The training data is all created by hand and does not use peak to peak linear values (sawtooth). It is not using community or commercially generated funscripts. The goal is to generate base funscripts to enhance throughput of funscript creators, to help them compete with AI, not to replace them with AI.
 
-Currently only 'post trained' the efficientnetv2s model. The XL model should score higher. Also finetuning the base model may yield positive results.
+Currently I've only trained my extra layers on the efficientnetv2 S model. The XL model should score higher. Also finetuning the base model may yield positive results.
 
 
 
