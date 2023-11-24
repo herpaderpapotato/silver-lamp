@@ -23,6 +23,7 @@ inference.py will load the video in opencv.
 * ] to grow the poi window
 * , to shrink the frame delay (faster rendering)
 * . to make the frame delay longer
+* q to quit and export the collected predictions to ./predictions folder
 
 This isn't doing batching, it's not as quick as it could be.
 * It could be even quicker if it just did one type of prediction. 

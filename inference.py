@@ -18,9 +18,21 @@ from tensorflow.keras import layers
 
 image_frames = 60
 image_size = 384
-video_name = '/mnt/q/original/SLR_TmwVRNet_Sexy Housekeeper Gets A Creampie_1920p_35311_LR_180.mp4'
+video_name = ''
 model_name = ''
 model = None
+
+import argparse
+parser = argparse.ArgumentParser(description='Process some integers.')
+parser.add_argument('--video', help='video file to process')
+parser.add_argument('--model', help='model file to use')
+args = parser.parse_args()
+if args.video:
+    video_name = args.video
+if args.model:
+    model_name = args.model
+
+
 
 def download_model():
     model_url = "https://huggingface.co/herpaderpapotato/sixty_small_body_ryhthm_time_bidirectional/resolve/main/effv2s_60in_60out_129e.h5?download=true"
@@ -33,6 +45,28 @@ def download_model():
     else:
         print(f"Model {model_name} already downloaded.")
 
+
+models = glob('models/*.h5')
+if not len(models) > 0 and model_name == '':
+    print('no model specified, downloading default model')
+    download_model()
+
+if not os.path.exists('models'):
+    os.makedirs('models')
+
+if video_name == '':
+    videos = glob('*.mp4')
+    if len(videos) > 0:
+        videos.sort(key=os.path.getmtime)
+        video_name = videos[-1]
+        print('loading video: ' + video_name)
+    else:
+        print('no video specified')
+        exit()
+else:
+    if not os.path.exists(video_name):
+        print('video does not exist', video_name)
+        exit()
 
 
 def load_model():
