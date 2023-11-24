@@ -40,3 +40,4 @@ It's not as accurate as it could be
 
 At the moment it is only suitable (barely) for taking some of the tedium out of the process, especially when it comes to obvious and repetitive movement.
 
+I should probably convert this to pytorch so that GPU inference can be done in windows. Or tflite for faster cpu in windows. And to test/do more in windows.

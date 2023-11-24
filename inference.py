@@ -203,6 +203,7 @@ try:
             poi_pct += 0.01
             poi_pct = min(poi_pct, 1)
             poi_offset = max(int(frame_width * poi_pct) // 2, image_size // 2)
+            # need to add some code to make sure poi_x and poi_y are still within bounds based on the offset or growing the pct could cause an error
 
 
         if poi:
