@@ -33,6 +33,7 @@ share/python-wheels/
 *.spec
 
 *.h5
+*.onnx
 datasets/**/*.jpg
 *.keras
 test/*
