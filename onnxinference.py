@@ -4,12 +4,9 @@ import numpy as np
 from glob import glob
 from collections import deque
 import json
-import random
 import cv2
 import requests
 import numpy as np
-import math
-import matplotlib.pyplot as plt
 import onnxruntime as rt
 import cv2
 import json
