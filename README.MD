@@ -44,5 +44,9 @@ Maybe probably migrates to pytorch so that GPU inference can be done in windows.
 
 And to test/do more in windows for those not already comfortable with wsl.
 
-
 [Stuff I had to do on a fresh WSL install to get it going](TROUBLESHOOTING.MD)
+
+
+
+
+Also I had to recreate the repo because it was ignoring commits, seems okay now.
