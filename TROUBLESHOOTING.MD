@@ -46,3 +46,14 @@ Usage instructions on the [README.MD](README.MD)
 
 
 To copy files in and out of the Ubuntu instance I had to open folder in explorer \\wsl.localhost\Ubuntu\home, and then navigate to my username and the silver-lamp folder.
+
+
+For onnx runtime prediction on gpu in Ubuntu WSL I had to
+
+    pip install -r requirements_onnx.txt
+
+and 
+
+    export LD_LIBRARY_PATH=/home/herpaderpapotato/miniconda3/envs/silamp/lib/python3.10/site-packages/nvidia/cublas/lib/:/home/herpaderpapotato/miniconda3/envs/silamp/lib/python3.10/site-packages/nvidia/cudnn/lib/:/home/herpaderpapotato/miniconda3/envs/silamp/lib/python3.10/site-packages/nvidia/cufft/lib/:/home/herpaderpapotato/miniconda3/envs/silamp/lib/python3.10/site-packages/nvidia/cuda_runtime/lib/
+
+replace herpaderpapotato with whatever your ubuntu username is
