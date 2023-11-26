@@ -21,6 +21,9 @@ image_size = 384
 video_name = ''
 model_name = ''
 model = None
+start_time = 0
+end_time = 0
+
 if rt.get_device() == 'GPU':
     print('Using GPU')
     onnxproviders = ["CUDAExecutionProvider", "CPUExecutionProvider"]
@@ -28,15 +31,29 @@ else:
     print('Using CPU')
     onnxproviders = ["CPUExecutionProvider"]
 
+predict = False
 import argparse
 parser = argparse.ArgumentParser(description='Process some integers.')
 parser.add_argument('--video', help='video file to process')
 parser.add_argument('--model', help='model file to use')
+parser.add_argument('--start_time', help='start time in seconds')
+parser.add_argument('--end_time', help='end time in seconds')
+parser.add_argument('--predict', help='predict from start')
 args = parser.parse_args()
 if args.video:
     video_name = args.video
 if args.model:
     model_name = args.model
+if args.start_time:
+    start_time = args.start_time
+    start_time = int(start_time)
+    start_time = start_time * 1000
+if args.end_time:
+    end_time = args.end_time
+    end_time = int(end_time)
+    end_time = end_time * 1000
+if args.predict:
+    predict = True
 
 sess = None
 
@@ -105,13 +122,17 @@ def load_model():
             exit()
         print('loading model: models/' + model_name)
         #model = keras.models.load_model('models/' + model_name)
-        sess = rt.InferenceSession(model_name, providers=onnxproviders)
+        sess = rt.InferenceSession('models/' + model_name, providers=onnxproviders)
 
 cap = cv2.VideoCapture(video_name)
 fps = cap.get(cv2.CAP_PROP_FPS)
 frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) // 2
 frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+if start_time > 0:
+    cap.set(cv2.CAP_PROP_POS_MSEC, start_time)
+
 
 print('fps', fps)
 print('frame_count', frame_count)
@@ -123,7 +144,6 @@ frame_delay_multiplier = 1 / fps * 2
 frame_delay_base = 2
 frame_delay = max(frame_delay_base * frame_delay_multiplier,1)
 
-predict = False
 
 prediction_frames = deque(maxlen=image_frames)
 prediction_frames_crop = deque(maxlen=image_frames)
@@ -144,6 +164,8 @@ tmp_poi_x = frame_width // 2
 tmp_poi_y = frame_height // 2
 tmp_poi_pct = poi_pct
 tmp_poi_offset = poi_offset
+
+inputname = None
 
 def on_mouse(event, x, y, flags, param):
     global tmp_poi_x, tmp_poi_y, tmp_poi, predict, poi, cap
@@ -167,6 +189,9 @@ def on_mouse(event, x, y, flags, param):
                 poi_x = tmp_poi_x
                 poi_y = tmp_poi_y
             print('poi', tmp_poi_x, tmp_poi_y, tmp_poi_offset)
+            logfile = "poi.log"
+            with open(logfile, "a") as f:
+                f.write(video_name + ',' + str(cap.get(cv2.CAP_PROP_POS_MSEC)) + ',' + str(tmp_poi_x) + ',' + str(tmp_poi_y) + ',' + str(tmp_poi_offset) + '\n')
         else:
             progress = x / image_size
             cap.set(cv2.CAP_PROP_POS_FRAMES, int(progress * frame_count))
@@ -180,7 +205,10 @@ print(frame_delay)
 end = False
 
 while True:
-    predict = False
+    if args.predict:
+        predict = True
+    else:
+        predict = False
     prediction_times = []
     prediction_logged = []
     prediction_frame_numbers = []
@@ -196,6 +224,11 @@ while True:
             if not ret:
                 break
                 end = True
+            if end_time > 0:
+                if cap.get(cv2.CAP_PROP_POS_MSEC) > end_time:
+                    break
+                    end = True
+
             if display:
                 #display_frame = frame.copy()[0:frame_height, 0:frame_width]
                 display_frame = cv2.resize(frame.copy()[0:frame_height, 0:frame_width], (image_size, image_size))
@@ -287,6 +320,8 @@ while True:
             if predict:
                 if sess is None:
                     load_model()
+                if inputname is None:
+                    inputname = sess.get_inputs()[0].name
 
             if len(prediction_frames) == image_frames:
                 if predict:
@@ -301,9 +336,9 @@ while True:
                         prediction_frames_array = np.array([np.array(prediction_frames), np.array(prediction_frames_crop)]).astype(np.float32)
 
                     #predictions = model.predict(prediction_frames_array)
-                    predictions = sess.run(None, {'input_2': prediction_frames_array})[0]
+                    predictions = sess.run(None, {inputname: prediction_frames_array})[0]
                     prediction_logged.append(predictions)
-                    print(predictions)
+                    #print(predictions)
                     prediction_frames.clear()
                     prediction_frames_crop.clear()
                     prediction_frames_poi.clear()
@@ -400,6 +435,16 @@ while True:
             prediction_times_index = min(range(len(prediction_times)), key=lambda i: abs(prediction_times[i]-ftime))        
             frame = cv2.line(frame, (0, int(image_size * (1 - prediction_logged_original[prediction_times_index]))), (image_size, int(image_size * (1 - prediction_logged_original[prediction_times_index]))), (0, 0, 255), 2)
             frame = cv2.line(frame, (0, int(image_size * (1 - prediction_logged_cropped[prediction_times_index]))), (image_size, int(image_size * (1 - prediction_logged_cropped[prediction_times_index]))), (0, 255, 0), 2)
+            graph_y_0 = int(image_size * 0.1) +100
+            graph_y_100 = int(image_size * 0.1)
+            graph_x_0 = 0
+            graph_x_100 = image_size
+            for j in range(384):
+                column = 383 - j
+                if len(prediction_logged_original) > j:
+                    frame[graph_y_0 - int(100 * prediction_logged_original[prediction_times_index - j]), column] = (0, 0, 255)
+                if len(prediction_logged_cropped) > j:
+                    frame[graph_y_0 - int(100 * prediction_logged_cropped[prediction_times_index - j]), column] = (0, 255, 0)
             try:
                 prediction_poi_index = min(range(len(prediction_times_poi)), key=lambda i: abs(prediction_times_poi[i]-ftime))
                 frame = cv2.line(frame, (0, int(image_size * (1 - prediction_logged_poi[prediction_poi_index]))), (image_size, int(image_size * (1 - prediction_logged_poi[prediction_poi_index]))), (255, 0, 0), 2)
@@ -440,3 +485,8 @@ while True:
         break
     if end:
         break
+
+
+
+        
+        
