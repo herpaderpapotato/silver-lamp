@@ -33,17 +33,55 @@ A brute force approach to linear movement estimation in sequential images.
 
 '
 
-'
+### model stuff
+
+effv2s_60in_60out models training loss curve. After about 24 hours of training, ending mse 0.0043 for training, 0.02 for validation. learning rates...probably 1e-3 to start and then LR Reduction on Plateau.
+
+![Alt text](image-3.png)
+
+
+Running testing for hyperparameter tuning effv2s_60in_60out_variants in progress. Current loss curve compared to previous below. 0.00204 mse for training, 0.01699 for validation after 6 hours.
+
+
+![Alt text](image-4.png)
+
+i.e. it's learning better and has a better validation score. Partly because I've used significantly lower dropout rates which contribute to learning speed. This variant has 183mb trainable parameters, plus the 80mb of frozen parameters in the efficientnetv2S model.
+
+It's structured as:
+
+    input_shape = (60, 384, 384, 3)
+    inputs = keras.Input(shape=input_shape)
+    backbone = efficientnet.EfficientNetV2S(pretrained=backbone_path,dropout=1e-6, num_classes=0, include_preprocessing = True)
+    backbone.trainable = False
+    backbone_inputs = keras.Input(shape=(384, 384, 3))
+    y = backbone(backbone_inputs)
+    y = layers.Flatten()(y)
+    y = layers.Dense(256, activation="relu")(y)
+    y = layers.Dropout(1e-6)(y)
+    x = layers.TimeDistributed(keras.Model(backbone_inputs, y))(inputs)
+    x = layers.Dropout(1e-6)(x)
+    x = layers.Bidirectional(layers.LSTM(128, return_sequences=True))(x)
+    x = layers.Dropout(1e-6)(x)
+    x = layers.Bidirectional(layers.LSTM(128, return_sequences=False))(x)
+    x = layers.Dropout(1e-6)(x)
+    outputs = layers.Dense(60, activation="relu")(x)
+
+
+The large 256 dense layer connected to the 184320 parameter output of the efficientnetv2S allows it to learn more about the features and use that information. In the sixty_small_body_ryhthm_time_bidirectional model there's only 64 neurons in that layer and more subsequent LSTM and Dense layers, resulting in only ~20mb of trainable parameters (or less?) which was only just enough for it to derive information from the features layer to make valid predictions and the model was functionally underfitting. The new model will likely be named sixty_small_body_ryhthm_time_bidirectional_thicc or something to indicate the larger middle if it makes it to huggingface.
+
+I've kept away from using global pooling after the feature extractor for fear of losing relevant information. This is all amateur knowledge and haven't spared the time to try it out. I know classification uses it, but in this use case I have the suspicion that it would strip away relevant positional information.
 
 '
 
 '
 
-'
+### scratchpad
 
-scratchpad
+I need to label more data. I need to write a new labeller workflow.
 
-previously trained frame skipping (simulate 30fps data vs 60fps)
+I've previously trained using frame skipping (simulate 30fps data vs 60fps) and faster movements but haven't updated it for the current dataset. I need to revisit.
+
+I've observed sixty_small_body_ryhthm_time_bidirectional 
 
 Q: Why 60 frames of prediction? 
 
