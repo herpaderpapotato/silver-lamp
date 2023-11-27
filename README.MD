@@ -50,3 +50,5 @@ And to test/do more in windows for those not already comfortable with wsl.
 
 
 Also I had to recreate the repo because it was ignoring commits, seems okay now.
+
+Currently working on rewriting my labbeller, because the previous went over so many incarnations for datasets, I was creating labels in one format, migrating to funscripts, then migrating that to another format, etc. More and accurate data is needed to get best results.

@@ -132,3 +132,5 @@ The images above are those arrays visualized with:
 
 A global pooling layer can reduce the dimensions to (1, 1280), which might eliminate the need for a dense layer, or enable it to be smaller and still get the detail needed. Or even testing with the small model more and a larger Dense layer to find the point of diminishing returns with it. Also known as hyperparameter tuning.
 
+It may also be worthwhile to compare different outputs produced when swapping channels, using channels from different frames, or consolidating images onto one channel and merging together as one, or alternate frame subtraction techniques that accentuate edges and movement as preprocessors.
+

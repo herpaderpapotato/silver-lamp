@@ -13,7 +13,6 @@ import onnxruntime as rt
 import cv2
 import json
 import random
-import time
 import os
 
 image_frames = 60
@@ -30,15 +29,18 @@ if rt.get_device() == 'GPU':
 else:
     print('Using CPU')
     onnxproviders = ["CPUExecutionProvider"]
-
+hold = False
 predict = False
+replaypoi = False
 import argparse
 parser = argparse.ArgumentParser(description='Process some integers.')
 parser.add_argument('--video', help='video file to process')
 parser.add_argument('--model', help='model file to use')
 parser.add_argument('--start_time', help='start time in seconds')
 parser.add_argument('--end_time', help='end time in seconds')
-parser.add_argument('--predict', help='predict from start')
+parser.add_argument('--predict', help='predict from start', action='store_true')
+parser.add_argument('--hold', help='hold frame', action='store_true')
+parser.add_argument('--replaypoi', help='replay poi', action='store_true')
 args = parser.parse_args()
 if args.video:
     video_name = args.video
@@ -54,12 +56,19 @@ if args.end_time:
     end_time = end_time * 1000
 if args.predict:
     predict = True
+if args.hold:
+    hold = True
+if args.replaypoi:
+    replaypoi = True
+    predict = True
 
 sess = None
 
 def download_model():
     #model_url = "https://huggingface.co/herpaderpapotato/sixty_small_body_ryhthm_time_bidirectional/resolve/main/effv2s_60in_60out_130e_1e.onnx?download=true"
-    model_url = "https://huggingface.co/herpaderpapotato/sixty_small_body_ryhthm_time_bidirectional_thicc/resolve/main/sixty_small_body_ryhthm_time_bidirectional_thicc_e36.onnx?download=true"
+    #model_url = "https://huggingface.co/herpaderpapotato/sixty_small_body_ryhthm_time_bidirectional_thicc/resolve/main/sixty_small_body_ryhthm_time_bidirectional_thicc_e36.onnx?download=true"
+    model_url = "https://huggingface.co/herpaderpapotato/sixty_small_body_ryhthm_time_bidirectional_thicc/resolve/main/sixty_small_body_ryhthm_time_bidirectional_thicc_e125_0p007816.onnx?download=true" # best model val score. Newer available.
+    
     model_name = model_url.split("/")[-1].split("?")[0]
     model_path = os.path.join("models", model_name)
     if not os.path.exists(model_path):
@@ -91,6 +100,73 @@ else:
     if not os.path.exists(video_name):
         print('video does not exist', video_name)
         exit()
+
+
+cap = cv2.VideoCapture(video_name)
+fps = cap.get(cv2.CAP_PROP_FPS)
+frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) // 2
+frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+poi_pct = 0.2
+poi_x = frame_width // 2
+poi_y = frame_height // 2
+poi_offset = max(int(frame_width * poi_pct) // 2, image_size // 2)
+display = True
+tmp_poi_x = frame_width // 2
+tmp_poi_y = frame_height // 2
+tmp_poi_pct = poi_pct
+tmp_poi_offset = poi_offset
+
+poi = False
+if args.replaypoi:
+    poilogfiles = glob('poi_' + video_name + '*.csv')
+    poilogfiles.sort(key=os.path.getmtime)
+    poilogfile = poilogfiles[-1]
+    poitimes = []
+    poix = []
+    poiy = []
+    poioffset = []
+    with open(poilogfile) as f:
+        # where there's a duplicate of the time, keep only the later one in the order
+        unique_times = []
+        for line in f:
+            line = line.strip()
+            video, postime, x, y, offset = line.split(',')
+            if not postime in unique_times:
+                unique_times.append(postime)
+                poitimes.append(float(postime))
+                poix.append(int(x))
+                poiy.append(int(y))
+                poioffset.append(int(offset))
+            else:
+                index = unique_times.index(postime)
+                poitimes[index] = float(postime)
+                poix[index] = int(x)
+                poiy[index] = int(y)
+                poioffset[index] = int(offset)
+        
+        # poi_time is not ordered, start from the lowest time
+        poi_time_copy = poitimes.copy()
+        poi_time_copy.sort()
+        start_time = poi_time_copy[0]
+        start_time_index = poitimes.index(start_time)
+        tmp_poi_x = poix[start_time_index]
+        tmp_poi_y = poiy[start_time_index]
+        tmp_poi_offset = poioffset[start_time_index]
+        poi_x = tmp_poi_x
+        poi_y = tmp_poi_y
+        poi_offset = tmp_poi_offset
+        tmp_poi_pct = poi_offset / image_size
+        poi_pct = tmp_poi_pct
+
+        print('start_time', start_time)
+        for postime, x, y, offset in zip(poitimes, poix, poiy, poioffset):
+            print(postime, x, y, offset)
+
+    poi = True
+
+
 
 
 def load_model():
@@ -125,11 +201,6 @@ def load_model():
         #model = keras.models.load_model('models/' + model_name)
         sess = rt.InferenceSession('models/' + model_name, providers=onnxproviders)
 
-cap = cv2.VideoCapture(video_name)
-fps = cap.get(cv2.CAP_PROP_FPS)
-frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) // 2
-frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
 if start_time > 0:
     cap.set(cv2.CAP_PROP_POS_MSEC, start_time)
@@ -154,20 +225,10 @@ prediction_frames_frame_numbers = deque(maxlen=image_frames)
 prediction_frames_times_poi = deque(maxlen=image_frames)
 prediction_frames_frame_numbers_poi = deque(maxlen=image_frames)
 
-poi_pct = 0.2
-poi_x = frame_width // 2
-poi_y = frame_height // 2
-poi_offset = max(int(frame_width * poi_pct) // 2, image_size // 2)
-poi = False
-display = True
-hold = False
-tmp_poi_x = frame_width // 2
-tmp_poi_y = frame_height // 2
-tmp_poi_pct = poi_pct
-tmp_poi_offset = poi_offset
+
 
 inputname = None
-
+logfile = "poi_" + video_name + "_" + time.strftime("%Y%m%d-%H%M%S") + ".csv"
 def on_mouse(event, x, y, flags, param):
     global tmp_poi_x, tmp_poi_y, tmp_poi, predict, poi, cap
     if event == cv2.EVENT_LBUTTONDOWN:
@@ -190,7 +251,6 @@ def on_mouse(event, x, y, flags, param):
                 poi_x = tmp_poi_x
                 poi_y = tmp_poi_y
             print('poi', tmp_poi_x, tmp_poi_y, tmp_poi_offset)
-            logfile = "poi.log"
             with open(logfile, "a") as f:
                 f.write(video_name + ',' + str(cap.get(cv2.CAP_PROP_POS_MSEC)) + ',' + str(tmp_poi_x) + ',' + str(tmp_poi_y) + ',' + str(tmp_poi_offset) + '\n')
         else:
@@ -206,7 +266,7 @@ print(frame_delay)
 end = False
 
 while True:
-    if args.predict:
+    if args.predict or args.replaypoi:
         predict = True
     else:
         predict = False
@@ -223,12 +283,26 @@ while True:
         while True:
             ret, frame = cap.read()
             if not ret:
-                break
                 end = True
+                break
+            frame_current_time = cap.get(cv2.CAP_PROP_POS_MSEC)
             if end_time > 0:
-                if cap.get(cv2.CAP_PROP_POS_MSEC) > end_time:
-                    break
+                if frame_current_time > end_time:
                     end = True
+                    break
+            if args.replaypoi:
+                if frame_current_time in poitimes:
+                    poi = True
+                    poi_index = poitimes.index(frame_current_time)
+                    tmp_poi_x = poix[poi_index]
+                    tmp_poi_y = poiy[poi_index]
+                    tmp_poi_offset = poioffset[poi_index]
+                    if not predict:
+                        poi_pct = tmp_poi_pct
+                        poi_offset = tmp_poi_offset
+                        poi_x = tmp_poi_x
+                        poi_y = tmp_poi_y
+
 
             if display:
                 #display_frame = frame.copy()[0:frame_height, 0:frame_width]
@@ -261,7 +335,42 @@ while True:
                 key = cv2.waitKey(0)
             else:
                 key = cv2.waitKey(int(frame_delay))
+            
+            if hold and key == ord('[') or key == ord(']'):
+                while True:
+                    if key == ord('['):
+                        tmp_poi_pct -= 0.01
+                        tmp_poi_pct = max(tmp_poi_pct, 0.02)
+                        tmp_poi_offset = int(frame_width * tmp_poi_pct) // 2
+                    elif key == ord(']'):
+                        tmp_poi_pct += 0.01
+                        tmp_poi_pct = min(tmp_poi_pct, 1)
+                        tmp_poi_offset = int(frame_width * tmp_poi_pct) // 2
+
+                    display_frame = cv2.resize(frame.copy()[0:frame_height, 0:frame_width], (image_size, image_size))
+                    top_y = 0.1 * display_frame.shape[0]
+                    cv2.rectangle(display_frame, (0, 0), (display_frame.shape[1], int(top_y)), (255, 0, 0), -1)
+                    frame_number = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+                    progress = frame_number / frame_count
+                    #print(progress, frame_number, frame_count)
+                    cv2.rectangle(display_frame, (0, 0), (int(display_frame.shape[1] * progress), int(top_y)), (0, 255, 0), -1)
+                    if poi:
+                        display_poi_x = tmp_poi_x / frame_width * image_size
+                        display_poi_y = tmp_poi_y / frame_height * image_size
+                        display_poi_offset = tmp_poi_offset / frame_width * image_size
+                        if not predict:
+                            poi_pct = tmp_poi_pct
+                            poi_offset = tmp_poi_offset
+                            poi_x = tmp_poi_x
+                            poi_y = tmp_poi_y
+                        cv2.circle(display_frame, (int(display_poi_x), int(display_poi_y)), int(display_poi_offset), (0, 0, 255), 2)
+                        cv2.rectangle(display_frame, (int(display_poi_x - display_poi_offset), int(display_poi_y - display_poi_offset)), (int(display_poi_x + display_poi_offset), int(display_poi_y + display_poi_offset)), (0, 0, 255), 2)
+                    cv2.imshow('frame', display_frame)
+                    key = cv2.waitKey(0)
+                    if key != ord('[') and key != ord(']'):
+                        break
             if key == ord('q'):
+                print('quitting, end frame', cap.get(cv2.CAP_PROP_POS_FRAMES), "at time", cap.get(cv2.CAP_PROP_POS_MSEC))
                 break
             if key == ord('p'):
                 predict = True
@@ -275,15 +384,6 @@ while True:
             if key == ord('.'):
                 frame_delay_multiplier += 1
                 frame_delay = max(frame_delay_base * frame_delay_multiplier,1)
-            if key == ord('['):
-                tmp_poi_pct -= 0.01
-                tmp_poi_pct = max(tmp_poi_pct, 0.02)
-                tmp_poi_offset = int(frame_width * tmp_poi_pct) // 2
-            if key == ord(']'):
-                tmp_poi_pct += 0.01
-                tmp_poi_pct = min(tmp_poi_pct, 1)
-                tmp_poi_offset = int(frame_width * tmp_poi_pct) // 2
-                # need to add some code to make sure poi_x and poi_y are still within bounds based on the offset or growing the pct could cause an error
             if key == ord('e'): # dump to disk
                 break
 
@@ -349,9 +449,7 @@ while True:
                     poi_offset = tmp_poi_offset
                     poi_x = tmp_poi_x
                     poi_y = tmp_poi_y
-            
-
-
+        
             if key == ord('v'):
                 cap.set(cv2.CAP_PROP_POS_MSEC, cap.get(cv2.CAP_PROP_POS_MSEC) + 60000)
             if key == ord('b'):
@@ -449,6 +547,10 @@ while True:
             try:
                 prediction_poi_index = min(range(len(prediction_times_poi)), key=lambda i: abs(prediction_times_poi[i]-ftime))
                 frame = cv2.line(frame, (0, int(image_size * (1 - prediction_logged_poi[prediction_poi_index]))), (image_size, int(image_size * (1 - prediction_logged_poi[prediction_poi_index]))), (255, 0, 0), 2)
+                for j in range(384):
+                    column = 383 - j
+                    if len(prediction_logged_poi) > j:
+                        frame[graph_y_0 - int(100 * prediction_logged_poi[prediction_poi_index - j]), column] = (255, 0, 0)
             except:
                 pass
 
