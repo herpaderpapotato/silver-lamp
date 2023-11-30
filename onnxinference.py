@@ -67,7 +67,8 @@ sess = None
 def download_model():
     #model_url = "https://huggingface.co/herpaderpapotato/sixty_small_body_ryhthm_time_bidirectional/resolve/main/effv2s_60in_60out_130e_1e.onnx?download=true"
     #model_url = "https://huggingface.co/herpaderpapotato/sixty_small_body_ryhthm_time_bidirectional_thicc/resolve/main/sixty_small_body_ryhthm_time_bidirectional_thicc_e36.onnx?download=true"
-    model_url = "https://huggingface.co/herpaderpapotato/sixty_small_body_ryhthm_time_bidirectional_thicc/resolve/main/sixty_small_body_ryhthm_time_bidirectional_thicc_e125_0p007816.onnx?download=true" # best model val score. Newer available.
+    #model_url = "https://huggingface.co/herpaderpapotato/sixty_small_body_ryhthm_time_bidirectional_thicc/resolve/main/sixty_small_body_ryhthm_time_bidirectional_thicc_e125_0p007816.onnx?download=true" # best model val score. Newer available.
+    model_url = "https://huggingface.co/herpaderpapotato/sixty_small_body_ryhthm_time_bidirectional_doublethicc/resolve/main/sixty_small_body_ryhthm_time_bidirectional_doublethicc_e124_fullonlye160.onnx?download=true" # double thicc! 10GB vram
     
     model_name = model_url.split("/")[-1].split("?")[0]
     model_path = os.path.join("models", model_name)
