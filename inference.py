@@ -3,39 +3,77 @@ import time
 import numpy as np
 from glob import glob
 from collections import deque
-from keras_cv_attention_models import efficientnet
 import json
 import random
 import cv2
 import requests
-import tensorflow as tf
+import numpy as np
+import math
+#import onnxruntime as rt
 os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+import tensorflow as tf
 policy = tf.keras.mixed_precision.Policy("mixed_float16")
 tf.keras.mixed_precision.set_global_policy(policy)
 from tensorflow import keras
-from tensorflow.keras import layers
+import cv2
+import json
+import random
+import os
 
 image_frames = 60
 image_size = 384
 video_name = ''
 model_name = ''
 model = None
+start_time = 0
+end_time = 0
 
+# if rt.get_device() == 'GPU':
+#     print('Using GPU')
+#     onnxproviders = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+# else:
+#     print('Using CPU')
+#     onnxproviders = ["CPUExecutionProvider"]
+hold = False
+predict = False
+replaypoi = False
 import argparse
 parser = argparse.ArgumentParser(description='Process some integers.')
 parser.add_argument('--video', help='video file to process')
 parser.add_argument('--model', help='model file to use')
+parser.add_argument('--start_time', help='start time in seconds')
+parser.add_argument('--end_time', help='end time in seconds')
+parser.add_argument('--predict', help='predict from start', action='store_true')
+parser.add_argument('--hold', help='hold frame', action='store_true')
+parser.add_argument('--replaypoi', help='replay poi', action='store_true')
+parser.add_argument('--terminate', help='terminate', action='store_true')
 args = parser.parse_args()
 if args.video:
     video_name = args.video
 if args.model:
     model_name = args.model
+if args.start_time:
+    start_time = args.start_time
+    start_time = int(start_time)
+    start_time = start_time * 1000
+if args.end_time:
+    end_time = args.end_time
+    end_time = int(end_time)
+    end_time = end_time * 1000
+if args.predict:
+    predict = True
+if args.hold:
+    hold = True
+if args.replaypoi:
+    replaypoi = True
+    predict = True
 
-
+#sess = None
 
 def download_model():
-    model_url = "https://huggingface.co/herpaderpapotato/sixty_small_body_ryhthm_time_bidirectional/resolve/main/effv2s_60in_60out_129e.h5?download=true"
+    model_url = "https://huggingface.co/herpaderpapotato/sixty_small_body_ryhthm_time_bidirectional_doublethicc/resolve/main/sixty_small_body_ryhthm_time_bidirectional_doublethicc_e124_fullonlye160.h5?download=true" # best model val score. Newer available.
+    
     model_name = model_url.split("/")[-1].split("?")[0]
     model_path = os.path.join("models", model_name)
     if not os.path.exists(model_path):
@@ -69,8 +107,75 @@ else:
         exit()
 
 
+cap = cv2.VideoCapture(video_name)
+fps = cap.get(cv2.CAP_PROP_FPS)
+frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) // 2
+frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+poi_pct = 0.2
+poi_x = frame_width // 2
+poi_y = frame_height // 2
+poi_offset = max(int(frame_width * poi_pct) // 2, image_size // 2)
+display = True
+tmp_poi_x = frame_width // 2
+tmp_poi_y = frame_height // 2
+tmp_poi_pct = poi_pct
+tmp_poi_offset = poi_offset
+
+poi = False
+if args.replaypoi:
+    poilogfiles = glob('poi_' + video_name + '*.csv')
+    poilogfiles.sort(key=os.path.getmtime)
+    poilogfile = poilogfiles[-1]
+    poitimes = []
+    poix = []
+    poiy = []
+    poioffset = []
+    with open(poilogfile) as f:
+        # where there's a duplicate of the time, keep only the later one in the order
+        unique_times = []
+        for line in f:
+            line = line.strip()
+            video, postime, x, y, offset = line.split(',')
+            if not postime in unique_times:
+                unique_times.append(postime)
+                poitimes.append(float(postime))
+                poix.append(int(x))
+                poiy.append(int(y))
+                poioffset.append(int(offset))
+            else:
+                index = unique_times.index(postime)
+                poitimes[index] = float(postime)
+                poix[index] = int(x)
+                poiy[index] = int(y)
+                poioffset[index] = int(offset)
+        
+        # poi_time is not ordered, start from the lowest time
+        poi_time_copy = poitimes.copy()
+        poi_time_copy.sort()
+        start_time = poi_time_copy[0]
+        start_time_index = poitimes.index(start_time)
+        tmp_poi_x = poix[start_time_index]
+        tmp_poi_y = poiy[start_time_index]
+        tmp_poi_offset = poioffset[start_time_index]
+        poi_x = tmp_poi_x
+        poi_y = tmp_poi_y
+        poi_offset = tmp_poi_offset
+        tmp_poi_pct = poi_offset / image_size
+        poi_pct = tmp_poi_pct
+
+        print('start_time', start_time)
+        for postime, x, y, offset in zip(poitimes, poix, poiy, poioffset):
+            print(postime, x, y, offset)
+
+    poi = True
+
+
+
+
 def load_model():
-    global model, model_name
+    global model, model_name  #, sess, onnxproviders
     if model_name == '':
         print('no model specified')
         models = glob('models/*.h5')
@@ -78,14 +183,16 @@ def load_model():
             models.sort(key=os.path.getmtime)
             model_name = models[-1]
             print('loading model: ' + model_name)
+            #sess = rt.InferenceSession(model_name, providers=onnxproviders)
             model = keras.models.load_model(model_name)
         else:
             download_model()
-            models = glob('models/*.h5')
+            models = glob('models/*.onnx')
             if len(models) > 0:
                 models.sort(key=os.path.getmtime)
                 model_name = models[-1]
                 print('loading model: ' + model_name)
+                #sess = rt.InferenceSession(model_name, providers=onnxproviders)
                 model = keras.models.load_model(model_name)
             else:
                 print('model does not exist', 'models/' + model_name)
@@ -97,23 +204,23 @@ def load_model():
             exit()
         print('loading model: models/' + model_name)
         model = keras.models.load_model('models/' + model_name)
+        #sess = rt.InferenceSession('models/' + model_name, providers=onnxproviders)
 
-cap = cv2.VideoCapture(video_name)
-fps = cap.get(cv2.CAP_PROP_FPS)
-frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) // 2
-frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+if start_time > 0:
+    cap.set(cv2.CAP_PROP_POS_MSEC, start_time)
+
 
 print('fps', fps)
 print('frame_count', frame_count)
 print('frame_width', frame_width)
 print('frame_height', frame_height)
 
-frame_delay_multiplier = (1 / fps) * 1000 / 2
+#frame_delay_multiplier = (1 / fps) * 1000 / 2
+frame_delay_multiplier = 1 / fps * 2
 frame_delay_base = 2
 frame_delay = max(frame_delay_base * frame_delay_multiplier,1)
 
-predict = False
 
 prediction_frames = deque(maxlen=image_frames)
 prediction_frames_crop = deque(maxlen=image_frames)
@@ -123,206 +230,371 @@ prediction_frames_frame_numbers = deque(maxlen=image_frames)
 prediction_frames_times_poi = deque(maxlen=image_frames)
 prediction_frames_frame_numbers_poi = deque(maxlen=image_frames)
 
-poi_pct = 0.2
-poi_x = 0
-poi_y = 0
-poi_offset = max(int(frame_width * poi_pct) // 2, image_size // 2)
-poi = False
-display = True
-hold = False
 
+
+inputname = None
+logfile = "poi_" + video_name + "_" + time.strftime("%Y%m%d-%H%M%S") + ".csv"
 def on_mouse(event, x, y, flags, param):
-    global poi_x, poi_y, poi
+    global tmp_poi_x, tmp_poi_y, tmp_poi, predict, poi, cap
     if event == cv2.EVENT_LBUTTONDOWN:
-        poi_x = int(x / image_size * frame_width)
-        poi_y = int(y / image_size * frame_height)
-        if poi_x < poi_offset:
-            poi_x = poi_offset
-        if poi_x > frame_width - poi_offset:
-            poi_x = frame_width - poi_offset
-        if poi_y < poi_offset:
-            poi_y = poi_offset
-        if poi_y > frame_height - poi_offset:
-            poi_y = frame_height - poi_offset
-        poi = True
+        top_y = 0.1 * frame_height
+        if y > top_y:
+            tmp_poi_x = int(x / image_size * frame_width)
+            tmp_poi_y = int(y / image_size * frame_height)
+            if tmp_poi_x < tmp_poi_offset:
+                tmp_poi_x = tmp_poi_offset
+            if tmp_poi_x > frame_width - tmp_poi_offset:
+                tmp_poi_x = frame_width - tmp_poi_offset
+            if tmp_poi_y < tmp_poi_offset:
+                tmp_poi_y = tmp_poi_offset
+            if tmp_poi_y > frame_height - tmp_poi_offset:
+                tmp_poi_y = frame_height - tmp_poi_offset
+            poi = True
+            if not predict:
+                poi_pct = tmp_poi_pct
+                poi_offset = tmp_poi_offset
+                poi_x = tmp_poi_x
+                poi_y = tmp_poi_y
+            print('poi', tmp_poi_x, tmp_poi_y, tmp_poi_offset)
+            with open(logfile, "a") as f:
+                f.write(video_name + ',' + str(cap.get(cv2.CAP_PROP_POS_MSEC)) + ',' + str(tmp_poi_x) + ',' + str(tmp_poi_y) + ',' + str(tmp_poi_offset) + '\n')
+        else:
+            progress = x / image_size
+            cap.set(cv2.CAP_PROP_POS_FRAMES, int(progress * frame_count))
+
 
 cv2.namedWindow('frame')
 cv2.setMouseCallback('frame', on_mouse)
 print(frame_delay)
 
-prediction_times = []
-prediction_logged = []
-prediction_frame_numbers = []
-prediction_times_poi = []
-prediction_frame_numbers_poi = []
 
-try:
-    ret, frame = cap.read()
-    display_frame = frame.copy()[0:frame_height, 0:frame_width]
-    cv2.imshow('frame', display_frame)
-    key = cv2.waitKey(int(frame_delay))
-    while True:
+end = False
+
+while True:
+    if args.predict or args.replaypoi:
+        predict = True
+    else:
+        predict = False
+    prediction_times = []
+    prediction_logged = []
+    prediction_frame_numbers = []
+    prediction_times_poi = []
+    prediction_frame_numbers_poi = []
+    try:
         ret, frame = cap.read()
-        if not ret:
-            break
-        if display:
-            display_frame = cv2.resize(frame.copy()[0:frame_height, 0:frame_width], (image_size, image_size))
+        display_frame = frame.copy()[0:frame_height, 0:frame_width]
+        cv2.imshow('frame', display_frame)         # should add a progress bar in the top 10 pixels across the top. And add the ability to click on it for a seek
+        key = cv2.waitKey(int(frame_delay))
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                end = True
+                break
+            frame_current_time = cap.get(cv2.CAP_PROP_POS_MSEC)
+            if end_time > 0:
+                if frame_current_time > end_time:
+                    end = True
+                    break
+            if args.replaypoi:
+                if frame_current_time in poitimes:
+                    poi = True
+                    poi_index = poitimes.index(frame_current_time)
+                    tmp_poi_x = poix[poi_index]
+                    tmp_poi_y = poiy[poi_index]
+                    tmp_poi_offset = poioffset[poi_index]
+                    if not predict:
+                        poi_pct = tmp_poi_pct
+                        poi_offset = tmp_poi_offset
+                        poi_x = tmp_poi_x
+                        poi_y = tmp_poi_y
+
+
+            if display:
+                #display_frame = frame.copy()[0:frame_height, 0:frame_width]
+                display_frame = cv2.resize(frame.copy()[0:frame_height, 0:frame_width], (image_size, image_size))
+                top_y = 0.1 * display_frame.shape[0]
+                cv2.rectangle(display_frame, (0, 0), (display_frame.shape[1], int(top_y)), (255, 0, 0), -1)
+                frame_number = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+                progress = frame_number / frame_count
+                #print(progress, frame_number, frame_count)
+                cv2.rectangle(display_frame, (0, 0), (int(display_frame.shape[1] * progress), int(top_y)), (0, 255, 0), -1)
+                if poi:
+
+                    display_poi_x = tmp_poi_x / frame_width * image_size
+                    display_poi_y = tmp_poi_y / frame_height * image_size
+                    display_poi_offset = tmp_poi_offset / frame_width * image_size
+                    if not predict:
+                        poi_pct = tmp_poi_pct
+                        poi_offset = tmp_poi_offset
+                        poi_x = tmp_poi_x
+                        poi_y = tmp_poi_y
+                    cv2.circle(display_frame, (int(display_poi_x), int(display_poi_y)), int(display_poi_offset), (0, 0, 255), 2)
+                    cv2.rectangle(display_frame, (int(display_poi_x - display_poi_offset), int(display_poi_y - display_poi_offset)), (int(display_poi_x + display_poi_offset), int(display_poi_y + display_poi_offset)), (0, 0, 255), 2)
+                if predict:
+                    # show a red circle in the top left corner
+                    cv2.circle(display_frame, (0, 0), 10, (0, 0, 255), 10)
+                
+
+                cv2.imshow('frame', display_frame)
+            if hold:
+                key = cv2.waitKey(0)
+            else:
+                key = cv2.waitKey(int(frame_delay))
+            
+            if hold and key == ord('[') or key == ord(']'):
+                while True:
+                    if key == ord('['):
+                        tmp_poi_pct -= 0.01
+                        tmp_poi_pct = max(tmp_poi_pct, 0.02)
+                        tmp_poi_offset = int(frame_width * tmp_poi_pct) // 2
+                    elif key == ord(']'):
+                        tmp_poi_pct += 0.01
+                        tmp_poi_pct = min(tmp_poi_pct, 1)
+                        tmp_poi_offset = int(frame_width * tmp_poi_pct) // 2
+
+                    display_frame = cv2.resize(frame.copy()[0:frame_height, 0:frame_width], (image_size, image_size))
+                    top_y = 0.1 * display_frame.shape[0]
+                    cv2.rectangle(display_frame, (0, 0), (display_frame.shape[1], int(top_y)), (255, 0, 0), -1)
+                    frame_number = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+                    progress = frame_number / frame_count
+                    #print(progress, frame_number, frame_count)
+                    cv2.rectangle(display_frame, (0, 0), (int(display_frame.shape[1] * progress), int(top_y)), (0, 255, 0), -1)
+                    if poi:
+                        display_poi_x = tmp_poi_x / frame_width * image_size
+                        display_poi_y = tmp_poi_y / frame_height * image_size
+                        display_poi_offset = tmp_poi_offset / frame_width * image_size
+                        if not predict:
+                            poi_pct = tmp_poi_pct
+                            poi_offset = tmp_poi_offset
+                            poi_x = tmp_poi_x
+                            poi_y = tmp_poi_y
+                        cv2.circle(display_frame, (int(display_poi_x), int(display_poi_y)), int(display_poi_offset), (0, 0, 255), 2)
+                        cv2.rectangle(display_frame, (int(display_poi_x - display_poi_offset), int(display_poi_y - display_poi_offset)), (int(display_poi_x + display_poi_offset), int(display_poi_y + display_poi_offset)), (0, 0, 255), 2)
+                    cv2.imshow('frame', display_frame)
+                    key = cv2.waitKey(0)
+                    if key != ord('[') and key != ord(']'):
+                        break
+            if key == ord('q'):
+                print('quitting, end frame', cap.get(cv2.CAP_PROP_POS_FRAMES), "at time", cap.get(cv2.CAP_PROP_POS_MSEC))
+                break
+            if key == ord('p'):
+                predict = True
+            if key == ord('d'):
+                display = not display
+            if key == ord('h'):
+                hold = not hold
+            if key == ord(','):
+                frame_delay_multiplier -= 1
+                frame_delay = max(frame_delay_base * frame_delay_multiplier,1)
+            if key == ord('.'):
+                frame_delay_multiplier += 1
+                frame_delay = max(frame_delay_base * frame_delay_multiplier,1)
+            if key == ord('e'): # dump to disk
+                break
+
             if poi:
-                display_poi_x = poi_x / frame_width * image_size
-                display_poi_y = poi_y / frame_height * image_size
-                display_poi_offset = poi_offset / frame_width * image_size
-                cv2.circle(display_frame, (int(display_poi_x), int(display_poi_y)), int(display_poi_offset), (0, 0, 255), 2)
-                cv2.rectangle(display_frame, (int(display_poi_x - display_poi_offset), int(display_poi_y - display_poi_offset)), (int(display_poi_x + display_poi_offset), int(display_poi_y + display_poi_offset)), (0, 0, 255), 2)
-            if predict:
-                # show a red circle in the top left corner
-                cv2.circle(display_frame, (0, 0), 10, (0, 0, 255), 10)
-            cv2.imshow('frame', display_frame)
-        if hold:
-            key = cv2.waitKey(0)
-        else:
-            key = cv2.waitKey(int(frame_delay))
-        if key == ord('q'):
-            break
-        if key == ord('p'):
-            predict = True
-        if key == ord('d'):
-            display = not display
-        if key == ord('h'):
-            hold = not hold
-        if key == ord(','):
-            frame_delay_multiplier -= 1
-            frame_delay = max(frame_delay_base * frame_delay_multiplier,1)
-        if key == ord('.'):
-            frame_delay_multiplier += 1
-            frame_delay = max(frame_delay_base * frame_delay_multiplier,1)
-        if key == ord('['):
-            poi_pct -= 0.01
-            poi_pct = max(poi_pct, 0.05)
-            poi_offset = max(int(frame_width * poi_pct) // 2, image_size // 2)
-        if key == ord(']'):
-            poi_pct += 0.01
-            poi_pct = min(poi_pct, 1)
-            poi_offset = max(int(frame_width * poi_pct) // 2, image_size // 2)
-            # need to add some code to make sure poi_x and poi_y are still within bounds based on the offset or growing the pct could cause an error
+                # poi_frame = frame.copy()
+                # poi_frame = poi_frame[poi_y - poi_offset:poi_y + poi_offset, poi_x - poi_offset:poi_x + poi_offset]
+                poi_frame = frame[poi_y - poi_offset:poi_y + poi_offset, poi_x - poi_offset:poi_x + poi_offset]
+                if poi_frame.shape[0] != image_size or poi_frame.shape[1] != image_size:
+                    poi_frame = cv2.resize(poi_frame, (image_size, image_size))
+                poi_frame = cv2.cvtColor(poi_frame, cv2.COLOR_BGR2RGB)
+                # cv2.imshow('poi', poi_frame)
+                # key = cv2.waitKey(1)
+                prediction_frames_poi.append(poi_frame)
+                prediction_frames_times_poi.append(cap.get(cv2.CAP_PROP_POS_MSEC))
+                prediction_frames_frame_numbers_poi.append(cap.get(cv2.CAP_PROP_POS_FRAMES))
 
+            
+            #crop_frame = frame.copy()[frame_height // 2:frame_height, frame_width // 4 : frame_width - frame_width // 4]
+            crop_frame = frame[frame_height // 2:frame_height, frame_width // 4 : frame_width - frame_width // 4]
+            if crop_frame.shape[0] != image_size or crop_frame.shape[1] != image_size:
+                crop_frame = cv2.resize(crop_frame, (image_size, image_size))
+            # crop_frame = cv2.cvtColor(crop_frame, cv2.COLOR_BGR2RGB)
+            # cv2.imshow('crop', crop_frame)
+            key = cv2.waitKey(1)
+            prediction_frames_crop.append(crop_frame)
+            prediction_frames_times.append(cap.get(cv2.CAP_PROP_POS_MSEC))
+            prediction_frames_frame_numbers.append(cap.get(cv2.CAP_PROP_POS_FRAMES))
 
-        if poi:
-            poi_frame = frame.copy()[poi_y - poi_offset:poi_y + poi_offset, poi_x - poi_offset:poi_x + poi_offset]
-            if poi_frame.shape[0] != image_size or poi_frame.shape[1] != image_size:
-                poi_frame = cv2.resize(poi_frame, (image_size, image_size))
-            poi_frame = cv2.cvtColor(poi_frame, cv2.COLOR_BGR2RGB)
-            # cv2.imshow('poi', poi_frame)
+            frame = frame[0:frame_height, 0:frame_width]
+            frame = cv2.resize(frame, (image_size, image_size))
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            # cv2.imshow('mainframe', frame)
             # key = cv2.waitKey(1)
-            prediction_frames_poi.append(poi_frame)
-            prediction_frames_times_poi.append(cap.get(cv2.CAP_PROP_POS_MSEC))
-            prediction_frames_frame_numbers_poi.append(cap.get(cv2.CAP_PROP_POS_FRAMES))
-
-        crop_frame = frame.copy()[frame_height // 2:frame_height, frame_width // 4 : frame_width - frame_width // 4]
-        if crop_frame.shape[0] != image_size or crop_frame.shape[1] != image_size:
-            crop_frame = cv2.resize(crop_frame, (image_size, image_size))
-        crop_frame = cv2.cvtColor(crop_frame, cv2.COLOR_BGR2RGB)
-        # cv2.imshow('crop', crop_frame)
-        # key = cv2.waitKey(1)
-        prediction_frames_crop.append(crop_frame)
-        prediction_frames_times.append(cap.get(cv2.CAP_PROP_POS_MSEC))
-        prediction_frames_frame_numbers.append(cap.get(cv2.CAP_PROP_POS_FRAMES))
-
-        frame = frame[0:frame_height, 0:frame_width]
-        frame = cv2.resize(frame, (image_size, image_size))
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        # cv2.imshow('mainframe', frame)
-        # key = cv2.waitKey(1)
-        prediction_frames.append(frame)
-        if predict:
-            if model is None:
-                load_model()
-
-        if len(prediction_frames) == image_frames:
+            prediction_frames.append(frame)
             if predict:
-                prediction_times.extend(prediction_frames_times)
-                prediction_frame_numbers.extend(prediction_frames_frame_numbers)
-                if poi and len(prediction_frames_poi) == len(prediction_frames):
-                    prediction_times_poi.extend(prediction_frames_times_poi)
-                    prediction_frame_numbers_poi.extend(prediction_frames_frame_numbers_poi)
-                if poi and len(prediction_frames_poi) == image_frames:
-                    prediction_frames_array = np.array([np.array(prediction_frames), np.array(prediction_frames_crop), np.array(prediction_frames_poi)])
-                else:
-                    prediction_frames_array = np.array([np.array(prediction_frames), np.array(prediction_frames_crop)])
-                predictions = model.predict(prediction_frames_array)
-                prediction_logged.append(predictions)
-                print(predictions)
-                prediction_frames.clear()
-                prediction_frames_crop.clear()
-                prediction_frames_poi.clear()
+                if model is None:
+                    load_model()
+                # if sess is None:
+                #     load_model()
+                # if inputname is None:
+                #     inputname = sess.get_inputs()[0].name
 
-        if key == ord('v'):
-            cap.set(cv2.CAP_PROP_POS_MSEC, cap.get(cv2.CAP_PROP_POS_MSEC) + 60000)
-        if key == ord('b'):
-            cap.set(cv2.CAP_PROP_POS_MSEC, cap.get(cv2.CAP_PROP_POS_MSEC) + 360000)
-        if key == ord('c'):
-            cap.set(cv2.CAP_PROP_POS_MSEC, cap.get(cv2.CAP_PROP_POS_MSEC) - 60000)
-        if key == ord('x'):
-            cap.set(cv2.CAP_PROP_POS_MSEC, cap.get(cv2.CAP_PROP_POS_MSEC) - 360000)
-        if key == ord('z'):
-            cap.set(cv2.CAP_PROP_POS_MSEC, cap.get(cv2.CAP_PROP_POS_MSEC) - 10000)
-except KeyboardInterrupt:
-    pass
-cv2.destroyAllWindows()
+            if len(prediction_frames) == image_frames:
+                if predict:
+                    prediction_times.extend(prediction_frames_times)
+                    prediction_frame_numbers.extend(prediction_frames_frame_numbers)
+                    if poi and len(prediction_frames_poi) == len(prediction_frames):
+                        prediction_times_poi.extend(prediction_frames_times_poi)
+                        prediction_frame_numbers_poi.extend(prediction_frames_frame_numbers_poi)
+                    if poi and len(prediction_frames_poi) == image_frames:
+                        prediction_frames_array = np.array([np.array(prediction_frames), np.array(prediction_frames_crop), np.array(prediction_frames_poi)]).astype(np.float32)
+                    else:
+                        prediction_frames_array = np.array([np.array(prediction_frames), np.array(prediction_frames_crop)]).astype(np.float32)
 
-if len(prediction_logged) > 0:
-    # dump to npy file
-    if not os.path.exists('predictions'):
-        os.makedirs('predictions')
+                    predictions = model.predict(prediction_frames_array)
+                    #predictions = sess.run(None, {inputname: prediction_frames_array})[0]
+                    prediction_logged.append(predictions)
+                    #print(predictions)
+                    prediction_frames.clear()
+                    prediction_frames_crop.clear()
+                    prediction_frames_poi.clear()
+                    
+                    # commit poi changes after prediction to avoid a change mid prediction
+                    poi_pct = tmp_poi_pct
+                    poi_offset = tmp_poi_offset
+                    poi_x = tmp_poi_x
+                    poi_y = tmp_poi_y
+        
+            if key == ord('v'):
+                cap.set(cv2.CAP_PROP_POS_MSEC, cap.get(cv2.CAP_PROP_POS_MSEC) + 60000)
+            if key == ord('b'):
+                cap.set(cv2.CAP_PROP_POS_MSEC, cap.get(cv2.CAP_PROP_POS_MSEC) + 360000)
+            if key == ord('c'):
+                cap.set(cv2.CAP_PROP_POS_MSEC, cap.get(cv2.CAP_PROP_POS_MSEC) - 60000)
+            if key == ord('x'):
+                cap.set(cv2.CAP_PROP_POS_MSEC, cap.get(cv2.CAP_PROP_POS_MSEC) - 360000)
+            if key == ord('z'):
+                cap.set(cv2.CAP_PROP_POS_MSEC, cap.get(cv2.CAP_PROP_POS_MSEC) - 10000)
+    except KeyboardInterrupt:
+        pass
+    cv2.destroyAllWindows()
 
-    prediction_logged_original = []
-    prediction_logged_cropped = []
-    prediction_logged_poi = []
-    for prediction in prediction_logged:
-        #print(len(prediction[0]))
-        for i in range(len(prediction[0])):
-            prediction_logged_original.append(prediction[0][i])
-            prediction_logged_cropped.append(prediction[1][i])
+    if len(prediction_logged) > 0:
+        # dump to npy file
+        if not os.path.exists('predictions'):
+            os.makedirs('predictions')
+
+        prediction_logged_original = []
+        prediction_logged_cropped = []
+        prediction_logged_poi = []
+        for prediction in prediction_logged:
+            #print(len(prediction[0]))
+            for i in range(len(prediction[0])):
+                prediction_logged_original.append(prediction[0][i])
+                prediction_logged_cropped.append(prediction[1][i])
+                try:
+                    prediction_logged_poi.append(prediction[2][i])
+                except IndexError:
+                    pass
+
+        funscript_filename = os.path.basename(video_name) + '.' + time.strftime("%Y%m%d-%H%M%S") + '.funscript'
+        funscript_json_data = {}
+        funscript_json_data['version'] = '1.0'
+        funscript_json_data['inverted'] = False
+        funscript_json_data['range'] = 100
+        funscript_json_data['actions'] = []
+        for i in range(len(prediction_logged_original)):
+            funscript_json_data['actions'].append({'at': int(prediction_times[i]), 'pos': int(prediction_logged_original[i] * 100)})
+        with open('predictions/' + funscript_filename, 'w') as outfile:
+            json.dump(funscript_json_data, outfile)
+        
+        funscript_filename = os.path.basename(video_name) + '.crop.' + time.strftime("%Y%m%d-%H%M%S") + '.funscript'
+        funscript_json_data = {}
+        funscript_json_data['version'] = '1.0'
+        funscript_json_data['inverted'] = False
+        funscript_json_data['range'] = 100
+        funscript_json_data['actions'] = []
+        for i in range(len(prediction_logged_cropped)):
+            funscript_json_data['actions'].append({'at': int(prediction_times[i]), 'pos': int(prediction_logged_cropped[i] * 100)})
+        with open('predictions/' + funscript_filename, 'w') as outfile:
+            json.dump(funscript_json_data, outfile)
+
+        funscript_filename = os.path.basename(video_name) + '.poi.' + time.strftime("%Y%m%d-%H%M%S") + '.funscript'
+        funscript_json_data = {}
+        funscript_json_data['version'] = '1.0'
+        funscript_json_data['inverted'] = False
+        funscript_json_data['range'] = 100
+        funscript_json_data['actions'] = []
+        for i in range(len(prediction_logged_poi)):
             try:
-                prediction_logged_poi.append(prediction[2][i])
+                funscript_json_data['actions'].append({'at': int(prediction_times[i]), 'pos': int(prediction_logged_poi[i] * 100)})
             except IndexError:
                 pass
+        with open('predictions/' + funscript_filename, 'w') as outfile:
+            json.dump(funscript_json_data, outfile)
 
-    funscript_filename = os.path.basename(video_name) + '.' + time.strftime("%Y%m%d-%H%M%S") + '.funscript'
-    funscript_json_data = {}
-    funscript_json_data['version'] = '1.0'
-    funscript_json_data['inverted'] = False
-    funscript_json_data['range'] = 100
-    funscript_json_data['actions'] = []
-    for i in range(len(prediction_logged_original)):
-        funscript_json_data['actions'].append({'at': int(prediction_times[i]), 'pos': int(prediction_logged_original[i] * 100)})
-    with open('predictions/' + funscript_filename, 'w') as outfile:
-        json.dump(funscript_json_data, outfile)
-    
-    funscript_filename = os.path.basename(video_name) + '.crop.' + time.strftime("%Y%m%d-%H%M%S") + '.funscript'
-    funscript_json_data = {}
-    funscript_json_data['version'] = '1.0'
-    funscript_json_data['inverted'] = False
-    funscript_json_data['range'] = 100
-    funscript_json_data['actions'] = []
-    for i in range(len(prediction_logged_cropped)):
-        funscript_json_data['actions'].append({'at': int(prediction_times[i]), 'pos': int(prediction_logged_cropped[i] * 100)})
-    with open('predictions/' + funscript_filename, 'w') as outfile:
-        json.dump(funscript_json_data, outfile)
+        # playback the frames from prediction_times
 
-    funscript_filename = os.path.basename(video_name) + '.poi.' + time.strftime("%Y%m%d-%H%M%S") + '.funscript'
-    funscript_json_data = {}
-    funscript_json_data['version'] = '1.0'
-    funscript_json_data['inverted'] = False
-    funscript_json_data['range'] = 100
-    funscript_json_data['actions'] = []
-    for i in range(len(prediction_logged_poi)):
-        try:
-            funscript_json_data['actions'].append({'at': int(prediction_times[i]), 'pos': int(prediction_logged_poi[i] * 100)})
-        except IndexError:
-            pass
-    with open('predictions/' + funscript_filename, 'w') as outfile:
-        json.dump(funscript_json_data, outfile)
+        if args.terminate:
+            break
 
+        cap.set(cv2.CAP_PROP_POS_MSEC, prediction_times[0])
+        i = 0
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            frame = frame[0:frame_height, 0:frame_width]
+            ftime = cap.get(cv2.CAP_PROP_POS_MSEC)
+            # add a line a percentage of the way down the screen based on prediction_logged[i]
+            # match the closest index in prediction_times to ftime
+            frame = cv2.resize(frame, (image_size, image_size))
+            prediction_times_index = min(range(len(prediction_times)), key=lambda i: abs(prediction_times[i]-ftime))        
+            frame = cv2.line(frame, (0, int(image_size * (1 - prediction_logged_original[prediction_times_index]))), (image_size, int(image_size * (1 - prediction_logged_original[prediction_times_index]))), (0, 0, 255), 2)
+            frame = cv2.line(frame, (0, int(image_size * (1 - prediction_logged_cropped[prediction_times_index]))), (image_size, int(image_size * (1 - prediction_logged_cropped[prediction_times_index]))), (0, 255, 0), 2)
+            graph_y_0 = int(image_size * 0.1) +100
+            graph_y_100 = int(image_size * 0.1)
+            graph_x_0 = 0
+            graph_x_100 = image_size
+            for j in range(384):
+                column = 383 - j
+                if len(prediction_logged_original) > j:
+                    frame[graph_y_0 - int(100 * prediction_logged_original[prediction_times_index - j]), column] = (0, 0, 255)
+                if len(prediction_logged_cropped) > j:
+                    frame[graph_y_0 - int(100 * prediction_logged_cropped[prediction_times_index - j]), column] = (0, 255, 0)
+            try:
+                prediction_poi_index = min(range(len(prediction_times_poi)), key=lambda i: abs(prediction_times_poi[i]-ftime))
+                frame = cv2.line(frame, (0, int(image_size * (1 - prediction_logged_poi[prediction_poi_index]))), (image_size, int(image_size * (1 - prediction_logged_poi[prediction_poi_index]))), (255, 0, 0), 2)
+                for j in range(384):
+                    column = 383 - j
+                    if len(prediction_logged_poi) > j:
+                        frame[graph_y_0 - int(100 * prediction_logged_poi[prediction_poi_index - j]), column] = (255, 0, 0)
+            except:
+                pass
 
-    
-    
+            cv2.imshow('frame', frame)
+            cv2.setWindowTitle('frame', 'frame ' + str(i) + '/' + str(len(prediction_times)))
+            key = cv2.waitKey(int(frame_delay))
+            if key == ord('q'):
+                break
+            if key == ord(','):  # need a reset to normal time too
+                frame_delay_multiplier -= 1
+                frame_delay = max(frame_delay_base * frame_delay_multiplier,1)
+            if key == ord('.'):
+                frame_delay_multiplier += 1
+                frame_delay = max(frame_delay_base * frame_delay_multiplier,1)
+            
+            if key == ord('v'):
+                cap.set(cv2.CAP_PROP_POS_MSEC, cap.get(cv2.CAP_PROP_POS_MSEC) + 60000)
+            if key == ord('b'):
+                cap.set(cv2.CAP_PROP_POS_MSEC, cap.get(cv2.CAP_PROP_POS_MSEC) + 360000)
+            if key == ord('c'):
+                cap.set(cv2.CAP_PROP_POS_MSEC, cap.get(cv2.CAP_PROP_POS_MSEC) - 60000)
+            if key == ord('x'):
+                cap.set(cv2.CAP_PROP_POS_MSEC, cap.get(cv2.CAP_PROP_POS_MSEC) - 360000)
+            if key == ord('z'):
+                cap.set(cv2.CAP_PROP_POS_MSEC, cap.get(cv2.CAP_PROP_POS_MSEC) - 10000)
+            # if not ftime in prediction_times:
+            #     cap.set(cv2.CAP_PROP_POS_MSEC, prediction_times[i])
+            if ftime > prediction_times[-1]:
+                cap.set(cv2.CAP_PROP_POS_MSEC, prediction_times[0])
+            i += 1
+            if i > len(prediction_times) - 1:
+                i = 0
+        cv2.destroyAllWindows()
+    if key == ord('q'):
+        break
+    if end:
+        break
