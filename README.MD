@@ -47,8 +47,23 @@ And to test/do more in windows for those not already comfortable with wsl.
 [Stuff I had to do on a fresh WSL install to get it going](TROUBLESHOOTING.MD)
 
 
+Currently looking for ways that don't require as much handholding. i.e. this works, but isn't broad enough. A combination of my training data, model architecture, or approach are inadequate to a "label any video" goal.
 
+This could make great funscripts if you:
 
-Also I had to recreate the repo because it was ignoring commits, seems okay now.
+1. had a lot more training data
+2. train separate models for different positions
+3. use a workflow (position identification model?) that uses the different models based on position
+4. had an ongoing desire to continually train and tune that over time as inaccuracies were found
 
-Currently working on rewriting my labbeller, because the previous went over so many incarnations for datasets, I was creating labels in one format, migrating to funscripts, then migrating that to another format, etc. More and accurate data is needed to get best results.
+But I'd also like to see a model handle longer predictions of 2 to 20 seconds of video per prediction to enable smoother movement. As well as having the model take an initial position as an input.
+
+Alternate model inputs being looked at are things like:
+* canny outputs
+* edge enhanced outputs
+* using images segmented by skin detection
+* bit packing image masks to lower parameter count
+    * e.g. a 256 x 256 x 1 image that is a 1 bit mask, *could* pack into a float 32, reducing the parameters by a factor of 32, BUT it's potentially harder for the model to learn the data given the bitwise nature of it.
+* using images segmented by segmentation models
+
+They all take time, energy and effort. The most interesting path I have at the moment is cloning the [DeepLabv3](https://github.com/tensorflow/models/blob/master/research/deeplab/README.md) architecture, and instead of the final segmenation output as an input to the model, using an earlier layer as a feature extraction layer.
