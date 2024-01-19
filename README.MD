@@ -66,4 +66,4 @@ Alternate model inputs being looked at are things like:
     * e.g. a 256 x 256 x 1 image that is a 1 bit mask, *could* pack into a float 32, reducing the parameters by a factor of 32, BUT it's potentially harder for the model to learn the data given the bitwise nature of it.
 * using images segmented by segmentation models
 
-They all take time, energy and effort. The most interesting path I have at the moment is cloning the [DeepLabv3](https://github.com/tensorflow/models/blob/master/research/deeplab/README.md) architecture, and instead of the final segmenation output as an input to the model, using an earlier layer as a feature extraction layer.
+They all take time, energy and effort. The most interesting path I have at the moment is cloning the [DeepLabv3](https://github.com/tensorflow/models/blob/master/research/deeplab/README.md) architecture, and instead of the final segmentation output as an input to the model, using an earlier layer as a feature extraction layer.
